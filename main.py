@@ -52,6 +52,10 @@ from reporter import (
 )
 
 
+APP_VERSION = "1.0.0"
+APP_COPYRIGHT = "\u00a9 2026 Digital Otomasi Niaga Aplikasi"
+
+
 class IDMTestApp:
     DURATIONS = {"5 menit": 5, "10 menit": 10, "30 menit": 30}
     POLL_INTERVAL_SEC = 5
@@ -169,6 +173,18 @@ class IDMTestApp:
         )
         self.btn_stop.pack(side="left")
 
+        self.gpu_check_var = tk.BooleanVar(value=True)
+        style.configure("Dark.TCheckbutton", background=self.BG,
+                        foreground=self.FG, font=("Segoe UI", 9))
+        style.map("Dark.TCheckbutton",
+                  background=[("active", self.BG)],
+                  foreground=[("active", self.FG)])
+        gpu_cb = ttk.Checkbutton(
+            ctrl, text="Cek GPU", variable=self.gpu_check_var,
+            style="Dark.TCheckbutton",
+        )
+        gpu_cb.pack(side="left", padx=(16, 0))
+
         # Progress
         prog_frame = ttk.Frame(self.root)
         prog_frame.pack(fill="x", padx=20, pady=(8, 2))
@@ -254,7 +270,18 @@ class IDMTestApp:
 
         # Sisa waktu
         self.lbl_time = ttk.Label(self.root, text="", style="TLabel")
-        self.lbl_time.pack(pady=(0, 10))
+        self.lbl_time.pack(pady=(0, 4))
+
+        # Footer
+        footer_frame = ttk.Frame(self.root)
+        footer_frame.pack(fill="x", side="bottom", padx=20, pady=(0, 8))
+        style.configure("Footer.TLabel", background=self.BG,
+                        foreground="#555555", font=("Segoe UI", 8))
+        ttk.Label(
+            footer_frame,
+            text=f"IDM Test v{APP_VERSION}  |  {APP_COPYRIGHT}",
+            style="Footer.TLabel",
+        ).pack(side="bottom")
 
     def _show_sensor_status(self):
         is_admin = "Ya" if ctypes.windll.shell32.IsUserAnAdmin() else "Tidak"
@@ -336,16 +363,29 @@ class IDMTestApp:
             self._finalize(duration_min, system_info)
             return
 
-        # ── Fase 2: Benchmark GPU FPS ───────────────────────────────────
-        self._schedule(lambda: self._update_phase(
-            "Fase 2/4 — Benchmark GPU (jendela rendering terbuka)"))
-        self._schedule(lambda: self.progress.configure(value=15))
-
+        # ── Fase 2: Benchmark GPU FPS (bisa di-skip) ────────────────────
+        do_gpu = self.gpu_check_var.get()
         gpu_info = get_gpu_info()
         self._schedule(lambda: self._update_bench_gpu_info(gpu_info))
 
-        avg_fps, min_fps = gpu_benchmark(10)
-        self._schedule(lambda: self._update_bench_gpu_fps(avg_fps, min_fps))
+        avg_fps = None
+        min_fps = None
+
+        if do_gpu:
+            total_phases = "4"
+            self._schedule(lambda: self._update_phase(
+                f"Fase 2/{total_phases} — Benchmark GPU "
+                "(jendela rendering terbuka)"))
+            self._schedule(lambda: self.progress.configure(value=15))
+
+            avg_fps, min_fps = gpu_benchmark(10)
+            self._schedule(
+                lambda: self._update_bench_gpu_fps(avg_fps, min_fps))
+        else:
+            self._schedule(lambda: self._update_phase(
+                "Fase 2 — Benchmark GPU (dilewati)"))
+            self._schedule(lambda: self._update_bench_gpu_fps(None, None))
+            time.sleep(0.5)
 
         self.bench_result = BenchmarkResult(
             disk_read_mbps=read_s,
@@ -361,9 +401,11 @@ class IDMTestApp:
             self._finalize(duration_min, system_info)
             return
 
+        phase_label = "3/4" if do_gpu else "2/3"
+
         # ── Fase 3: Idle Monitoring ─────────────────────────────────────
         self._schedule(lambda: self._update_phase(
-            "Fase 3/4 — Pemantauan Idle"))
+            f"Fase {phase_label} — Pemantauan Idle"))
         self._schedule(lambda: self.progress.configure(value=25))
         self.stress.start_idle()
         if not self._collect_phase(idle_seconds, total_seconds, 0):
@@ -371,8 +413,9 @@ class IDMTestApp:
             return
 
         # ── Fase 4: CPU Full Load ───────────────────────────────────────
+        phase_label2 = "4/4" if do_gpu else "3/3"
         self._schedule(lambda: self._update_phase(
-            "Fase 4/4 — Beban Penuh CPU"))
+            f"Fase {phase_label2} — Beban Penuh CPU"))
         self.stress.start_load()
         self._collect_phase(load_seconds, total_seconds, idle_seconds)
         self.stress.stop()
@@ -487,10 +530,17 @@ class IDMTestApp:
             text=f"{vram} MB" if vram else "N/A")
 
     def _update_bench_gpu_fps(self, avg_fps, min_fps):
-        self.bench_labels["gpu_fps"].configure(
-            text=f"{avg_fps} FPS" if avg_fps else "N/A")
-        self.bench_labels["gpu_fps_min"].configure(
-            text=f"{min_fps} FPS" if min_fps else "N/A")
+        if avg_fps is not None:
+            self.bench_labels["gpu_fps"].configure(
+                text=f"{avg_fps} FPS")
+            self.bench_labels["gpu_fps_min"].configure(
+                text=f"{min_fps} FPS" if min_fps else "N/A")
+        elif not self.gpu_check_var.get():
+            self.bench_labels["gpu_fps"].configure(text="Dilewati")
+            self.bench_labels["gpu_fps_min"].configure(text="Dilewati")
+        else:
+            self.bench_labels["gpu_fps"].configure(text="N/A")
+            self.bench_labels["gpu_fps_min"].configure(text="N/A")
 
 
 def main():

@@ -409,11 +409,17 @@ def generate_pdf_report(
     elements.append(HRFlowable(width="100%", thickness=0.5,
                                 color=HexColor("#cccccc")))
     elements.append(Paragraph(
-        "IDM Test — Alat Diagnostik Hardware — "
+        "IDM Test v1.0.0 — Alat Diagnostik Hardware — "
         "Laporan dibuat secara otomatis",
         ParagraphStyle("Footer", parent=body_style, fontSize=8,
                        textColor=HexColor("#999999"),
                        alignment=TA_CENTER),
+    ))
+    elements.append(Paragraph(
+        "\u00a9 2026 Digital Otomasi Niaga Aplikasi",
+        ParagraphStyle("FooterCR", parent=body_style, fontSize=7,
+                       textColor=HexColor("#aaaaaa"),
+                       alignment=TA_CENTER, spaceBefore=2),
     ))
 
     doc.build(elements)
