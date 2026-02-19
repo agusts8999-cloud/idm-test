@@ -2,7 +2,7 @@
 # IDM Test - Alat Diagnostik Hardware untuk Sistem POS
 # ============================================================================
 # Dependensi (install via pip):
-#   pip install psutil wmi pywin32 pythonnet reportlab matplotlib
+#   pip install psutil wmi pywin32 pythonnet reportlab matplotlib pygame
 #
 # Compile ke EXE:
 #   pyinstaller --onefile --windowed --uac-admin --add-data "lib;lib"
@@ -46,14 +46,16 @@ def ensure_admin():
 
 from monitor import HardwareMonitor, SensorReading
 from stress import StressEngine
-from reporter import CSVLogger, generate_chart, generate_pdf_report, get_desktop_path
+from benchmark import run_full_benchmark, BenchmarkResult
+from reporter import (
+    CSVLogger, generate_chart, generate_pdf_report, get_desktop_path,
+)
 
 
 class IDMTestApp:
     DURATIONS = {"5 menit": 5, "10 menit": 10, "30 menit": 30}
     POLL_INTERVAL_SEC = 5
 
-    # ── Tema ────────────────────────────────────────────────────────────
     BG = "#1a1a2e"
     BG_CARD = "#16213e"
     FG = "#e0e0e0"
@@ -66,7 +68,7 @@ class IDMTestApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("IDM Test — Diagnostik Hardware")
-        self.root.geometry("640x600")
+        self.root.geometry("660x720")
         self.root.resizable(False, False)
         self.root.configure(bg=self.BG)
 
@@ -75,6 +77,7 @@ class IDMTestApp:
         self.monitor = HardwareMonitor()
         self.stress = StressEngine()
         self.readings: list[SensorReading] = []
+        self.bench_result: BenchmarkResult | None = None
         self.csv_logger: CSVLogger | None = None
         self._running = False
         self._test_thread: threading.Thread | None = None
@@ -134,7 +137,7 @@ class IDMTestApp:
 
         # Header
         header = ttk.Frame(self.root)
-        header.pack(fill="x", padx=20, pady=(18, 4))
+        header.pack(fill="x", padx=20, pady=(14, 4))
         ttk.Label(header, text="IDM Test",
                   style="Title.TLabel").pack(side="left")
         ttk.Label(header, text="Alat Diagnostik Hardware POS",
@@ -143,7 +146,7 @@ class IDMTestApp:
 
         # Kontrol
         ctrl = ttk.Frame(self.root)
-        ctrl.pack(fill="x", padx=20, pady=(10, 4))
+        ctrl.pack(fill="x", padx=20, pady=(8, 4))
 
         ttk.Label(ctrl, text="Durasi:").pack(side="left")
         self.duration_var = tk.StringVar(value="5 menit")
@@ -168,7 +171,7 @@ class IDMTestApp:
 
         # Progress
         prog_frame = ttk.Frame(self.root)
-        prog_frame.pack(fill="x", padx=20, pady=(10, 2))
+        prog_frame.pack(fill="x", padx=20, pady=(8, 2))
 
         self.progress = ttk.Progressbar(
             prog_frame, orient="horizontal", mode="determinate",
@@ -180,23 +183,26 @@ class IDMTestApp:
                                     style="Status.TLabel")
         self.lbl_status.pack(pady=(4, 0))
 
-        # Kartu metrik
-        card = ttk.Frame(self.root, style="Card.TFrame", padding=14)
-        card.pack(fill="both", expand=True, padx=20, pady=(10, 6))
+        # ── Kartu metrik monitoring ─────────────────────────────────────
+        ttk.Label(self.root, text="Monitoring Real-time",
+                  style="Subtitle.TLabel").pack(padx=20, anchor="w",
+                                                 pady=(6, 0))
+        card = ttk.Frame(self.root, style="Card.TFrame", padding=10)
+        card.pack(fill="x", padx=20, pady=(2, 4))
 
         self.metric_labels: dict[str, tuple] = {}
         metrics = [
-            ("Penggunaan CPU", "cpu_percent", "%"),
+            ("Pemakaian CPU", "cpu_percent", "%"),
             ("Suhu CPU", "cpu_temp", "°C"),
-            ("Penggunaan RAM", "ram_percent", "%"),
-            ("Penggunaan Disk", "disk_percent", "%"),
+            ("Pemakaian RAM", "ram_percent", "%"),
+            ("Pemakaian Disk", "disk_percent", "%"),
             ("Suhu SSD/NVMe", "ssd_temp", "°C"),
         ]
 
         for i, (title, key, unit) in enumerate(metrics):
             row, col = divmod(i, 3)
             f = ttk.Frame(card, style="Card.TFrame")
-            f.grid(row=row, column=col, padx=14, pady=10, sticky="nsew")
+            f.grid(row=row, column=col, padx=12, pady=6, sticky="nsew")
             ttk.Label(f, text=title, style="MetricTitle.TLabel").pack()
             lbl = ttk.Label(f, text="--", style="Metric.TLabel")
             lbl.pack()
@@ -204,6 +210,35 @@ class IDMTestApp:
 
         for c in range(3):
             card.columnconfigure(c, weight=1)
+
+        # ── Kartu hasil benchmark ───────────────────────────────────────
+        ttk.Label(self.root, text="Hasil Benchmark",
+                  style="Subtitle.TLabel").pack(padx=20, anchor="w",
+                                                 pady=(6, 0))
+        bench_card = ttk.Frame(self.root, style="Card.TFrame", padding=10)
+        bench_card.pack(fill="x", padx=20, pady=(2, 4))
+
+        self.bench_labels: dict[str, ttk.Label] = {}
+        bench_metrics = [
+            ("Baca Disk", "disk_read"),
+            ("Tulis Disk", "disk_write"),
+            ("GPU FPS", "gpu_fps"),
+            ("GPU", "gpu_name"),
+            ("VRAM", "gpu_vram"),
+            ("FPS Min", "gpu_fps_min"),
+        ]
+
+        for i, (title, key) in enumerate(bench_metrics):
+            row, col = divmod(i, 3)
+            f = ttk.Frame(bench_card, style="Card.TFrame")
+            f.grid(row=row, column=col, padx=12, pady=6, sticky="nsew")
+            ttk.Label(f, text=title, style="MetricTitle.TLabel").pack()
+            lbl = ttk.Label(f, text="--", style="Metric.TLabel")
+            lbl.pack()
+            self.bench_labels[key] = lbl
+
+        for c in range(3):
+            bench_card.columnconfigure(c, weight=1)
 
         # Info deteksi sensor
         sensor_frame = ttk.Frame(self.root)
@@ -219,7 +254,7 @@ class IDMTestApp:
 
         # Sisa waktu
         self.lbl_time = ttk.Label(self.root, text="", style="TLabel")
-        self.lbl_time.pack(pady=(0, 14))
+        self.lbl_time.pack(pady=(0, 10))
 
     def _show_sensor_status(self):
         is_admin = "Ya" if ctypes.windll.shell32.IsUserAnAdmin() else "Tidak"
@@ -234,10 +269,12 @@ class IDMTestApp:
 
     def _on_start(self):
         self.readings.clear()
+        self.bench_result = None
         self._running = True
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.progress["value"] = 0
+        self._reset_bench_labels()
         self._update_status("Memulai...", self.YELLOW)
 
         self._test_thread = threading.Thread(target=self._run_test,
@@ -249,11 +286,17 @@ class IDMTestApp:
         self.stress.stop()
         self._update_status("Menghentikan...", self.YELLOW)
 
+    def _reset_bench_labels(self):
+        for lbl in self.bench_labels.values():
+            lbl.configure(text="--")
+
     def _run_test(self):
         duration_min = self.DURATIONS[self.duration_var.get()]
         total_seconds = duration_min * 60
+
+        bench_time = 25
         idle_seconds = 30
-        load_seconds = total_seconds - idle_seconds
+        load_seconds = max(10, total_seconds - idle_seconds - bench_time)
 
         try:
             self.csv_logger = CSVLogger()
@@ -265,18 +308,71 @@ class IDMTestApp:
 
         system_info = self.monitor.get_system_info()
 
-        # Fase 1: Idle (30 detik)
+        if not self._running:
+            self._finalize(duration_min, system_info)
+            return
+
+        # ── Fase 1: Benchmark Disk ──────────────────────────────────────
         self._schedule(lambda: self._update_phase(
-            "Fase 1/2 — Pemantauan Idle"))
+            "Fase 1/4 — Benchmark Kecepatan Disk"))
         self._schedule(lambda: self._update_status("Berjalan", self.GREEN))
+        self._schedule(lambda: self.progress.configure(value=5))
+
+        def on_disk_progress(phase_name):
+            if phase_name == "tulis":
+                self._schedule(lambda: self._update_phase(
+                    "Fase 1/4 — Benchmark Disk (Menulis...)"))
+            else:
+                self._schedule(lambda: self._update_phase(
+                    "Fase 1/4 — Benchmark Disk (Membaca...)"))
+
+        from benchmark import disk_benchmark, gpu_benchmark, \
+            get_gpu_info, BenchmarkResult
+
+        read_s, write_s = disk_benchmark(128, on_progress=on_disk_progress)
+        self._schedule(lambda: self._update_bench_disk(read_s, write_s))
+
+        if not self._running:
+            self._finalize(duration_min, system_info)
+            return
+
+        # ── Fase 2: Benchmark GPU FPS ───────────────────────────────────
+        self._schedule(lambda: self._update_phase(
+            "Fase 2/4 — Benchmark GPU (jendela rendering terbuka)"))
+        self._schedule(lambda: self.progress.configure(value=15))
+
+        gpu_info = get_gpu_info()
+        self._schedule(lambda: self._update_bench_gpu_info(gpu_info))
+
+        avg_fps, min_fps = gpu_benchmark(10)
+        self._schedule(lambda: self._update_bench_gpu_fps(avg_fps, min_fps))
+
+        self.bench_result = BenchmarkResult(
+            disk_read_mbps=read_s,
+            disk_write_mbps=write_s,
+            gpu_name=gpu_info["name"],
+            gpu_vram_mb=gpu_info["vram_mb"],
+            gpu_driver=gpu_info["driver"],
+            gpu_fps_avg=avg_fps,
+            gpu_fps_min=min_fps,
+        )
+
+        if not self._running:
+            self._finalize(duration_min, system_info)
+            return
+
+        # ── Fase 3: Idle Monitoring ─────────────────────────────────────
+        self._schedule(lambda: self._update_phase(
+            "Fase 3/4 — Pemantauan Idle"))
+        self._schedule(lambda: self.progress.configure(value=25))
         self.stress.start_idle()
         if not self._collect_phase(idle_seconds, total_seconds, 0):
             self._finalize(duration_min, system_info)
             return
 
-        # Fase 2: Beban Penuh
+        # ── Fase 4: CPU Full Load ───────────────────────────────────────
         self._schedule(lambda: self._update_phase(
-            "Fase 2/2 — Beban Penuh"))
+            "Fase 4/4 — Beban Penuh CPU"))
         self.stress.start_load()
         self._collect_phase(load_seconds, total_seconds, idle_seconds)
         self.stress.stop()
@@ -296,7 +392,7 @@ class IDMTestApp:
             self._schedule(lambda r=reading: self._update_metrics(r))
 
             elapsed_total = elapsed_before + (time.monotonic() - start)
-            pct = min(100, (elapsed_total / total_seconds) * 100)
+            pct = min(100, 25 + (elapsed_total / total_seconds) * 75)
             remaining = max(0, total_seconds - elapsed_total)
             self._schedule(
                 lambda p=pct: self.progress.configure(value=p))
@@ -325,7 +421,8 @@ class IDMTestApp:
 
             try:
                 pdf_path = generate_pdf_report(
-                    self.readings, duration_min, chart_path, system_info)
+                    self.readings, duration_min, chart_path,
+                    system_info, self.bench_result)
             except Exception as e:
                 self._schedule(lambda: messagebox.showwarning(
                     "Laporan", f"Gagal membuat PDF: {e}"))
@@ -373,6 +470,27 @@ class IDMTestApp:
                 label.configure(text=f"{value}{unit}")
             else:
                 label.configure(text="N/A")
+
+    def _update_bench_disk(self, read_s, write_s):
+        r = f"{read_s} MB/s" if read_s else "N/A"
+        w = f"{write_s} MB/s" if write_s else "N/A"
+        self.bench_labels["disk_read"].configure(text=r)
+        self.bench_labels["disk_write"].configure(text=w)
+
+    def _update_bench_gpu_info(self, gpu_info: dict):
+        name = gpu_info.get("name", "N/A")
+        if len(name) > 25:
+            name = name[:23] + "…"
+        self.bench_labels["gpu_name"].configure(text=name)
+        vram = gpu_info.get("vram_mb")
+        self.bench_labels["gpu_vram"].configure(
+            text=f"{vram} MB" if vram else "N/A")
+
+    def _update_bench_gpu_fps(self, avg_fps, min_fps):
+        self.bench_labels["gpu_fps"].configure(
+            text=f"{avg_fps} FPS" if avg_fps else "N/A")
+        self.bench_labels["gpu_fps_min"].configure(
+            text=f"{min_fps} FPS" if min_fps else "N/A")
 
 
 def main():

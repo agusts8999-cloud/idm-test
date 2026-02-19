@@ -441,6 +441,13 @@ class HardwareMonitor:
         ram = psutil.virtual_memory()
         disk = psutil.disk_usage("C:\\")
 
+        gpu_name = "N/A"
+        try:
+            from benchmark import get_gpu_info
+            gpu_name = get_gpu_info().get("name", "N/A")
+        except Exception:
+            pass
+
         return {
             "os": f"{platform.system()} {platform.release()} ({platform.version()})",
             "cpu_name": platform.processor() or "N/A",
@@ -450,6 +457,7 @@ class HardwareMonitor:
             "ram_total_gb": round(ram.total / (1024 ** 3), 2),
             "disk_total_gb": round(disk.total / (1024 ** 3), 2),
             "disk_free_gb": round(disk.free / (1024 ** 3), 2),
+            "gpu_name": gpu_name,
             "temp_cpu_method": self._cpu_method or "none",
             "temp_ssd_method": self._ssd_method or "none",
         }

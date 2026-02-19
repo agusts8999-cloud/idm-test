@@ -168,6 +168,7 @@ def generate_pdf_report(
     duration_minutes: int,
     chart_path: str,
     system_info: dict,
+    bench_result=None,
 ) -> str:
     output_path = os.path.join(get_desktop_path(), "idm-test-report.pdf")
 
@@ -245,6 +246,7 @@ def generate_pdf_report(
         ["Total RAM", f"{system_info.get('ram_total_gb', 'N/A')} GB"],
         ["Total Disk (C:)", f"{system_info.get('disk_total_gb', 'N/A')} GB"],
         ["Disk Kosong (C:)", f"{system_info.get('disk_free_gb', 'N/A')} GB"],
+        ["Kartu Grafis", str(system_info.get("gpu_name", "N/A"))],
     ]
     sys_table = Table(sys_data, colWidths=[55 * mm, 105 * mm])
     sys_table.setStyle(TableStyle([
@@ -308,6 +310,49 @@ def generate_pdf_report(
     ]))
     elements.append(stat_table)
     elements.append(Spacer(1, 6 * mm))
+
+    # ── Hasil Benchmark ─────────────────────────────────────────────
+    if bench_result is not None:
+        elements.append(Paragraph("Hasil Benchmark", heading_style))
+
+        disk_r = (f"{bench_result.disk_read_mbps} MB/s"
+                  if bench_result.disk_read_mbps else "N/A")
+        disk_w = (f"{bench_result.disk_write_mbps} MB/s"
+                  if bench_result.disk_write_mbps else "N/A")
+        gpu_name = bench_result.gpu_name or "N/A"
+        gpu_vram = (f"{bench_result.gpu_vram_mb} MB"
+                    if bench_result.gpu_vram_mb else "N/A")
+        gpu_driver = bench_result.gpu_driver or "N/A"
+        gpu_fps = (f"{bench_result.gpu_fps_avg} FPS"
+                   if bench_result.gpu_fps_avg else "N/A")
+        gpu_fps_min = (f"{bench_result.gpu_fps_min} FPS"
+                       if bench_result.gpu_fps_min else "N/A")
+
+        bench_data = [
+            ["Parameter", "Hasil"],
+            ["Kecepatan Baca Disk (Sequential)", disk_r],
+            ["Kecepatan Tulis Disk (Sequential)", disk_w],
+            ["Kartu Grafis (GPU)", gpu_name],
+            ["VRAM", gpu_vram],
+            ["Driver GPU", gpu_driver],
+            ["GPU FPS Rata-rata", gpu_fps],
+            ["GPU FPS Minimum", gpu_fps_min],
+        ]
+        bench_table = Table(bench_data, colWidths=[65 * mm, 95 * mm])
+        bench_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1a1a2e")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#ffffff")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 1), (-1, -1), HexColor("#f8f8fc")),
+            ("TEXTCOLOR", (0, 1), (-1, -1), HexColor("#333333")),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#cccccc")),
+        ]))
+        elements.append(bench_table)
+        elements.append(Spacer(1, 6 * mm))
 
     # ── Grafik ──────────────────────────────────────────────────────
     if chart_path and os.path.exists(chart_path):
